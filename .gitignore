@@ -1,0 +1,4 @@
+work/telegram_posts.json
+work/telegram_summary.json
+__pycache__/
+.DS_Store
