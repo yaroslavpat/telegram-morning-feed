@@ -39,7 +39,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work
-          printf '[]\n' > work/telegram_summary.json
           python build_telegram_feed.py 48
           python render_telegram_feed.py
 
@@ -89,15 +88,20 @@ jobs:
           check.feed(page)
           if not page.lstrip().lower().startswith('<!doctype html>') or not check.title:
               raise SystemExit('Generated page is missing a valid HTML document/title.')
-          if '<section class="summary-wrap">' in page:
-              raise SystemExit('Generated page unexpectedly contains the summary section.')
-          if not Path('work/telegram_summary.json').exists():
-              raise SystemExit('Expected empty summary input is missing.')
+          if 'summary-wrap' in page or 'Главное за двое суток' in page or 'топ-3' in page.lower():
+              raise SystemExit('Generated page unexpectedly contains summary content.')
+          if 'assets/lighthouse.png' not in page:
+              raise SystemExit('Generated page is missing the lighthouse icon.')
+          if not Path('assets/lighthouse.png').is_file():
+              raise SystemExit('The local lighthouse icon asset is missing.')
+          if 'aria-pressed="true"' not in page:
+              raise SystemExit('Channel filters are not hidden by default.')
           print(f'Validated index.html ({len(page.encode("utf-8"))} bytes, {check.posts} posts).')
           PY
 
           mkdir -p _site
           cp index.html .nojekyll _site/
+          cp -R assets _site/assets
 
       - name: Configure GitHub Pages
         if: steps.feed.outputs.skip_publish != 'true'
