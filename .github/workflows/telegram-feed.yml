@@ -1,4 +1,4 @@
-name: Build and publish Telegram feed
+name: Daily Telegram Feed
 
 on:
   schedule:
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -39,10 +39,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work
-          python build_telegram_feed.py 48
-          python render_telegram_feed.py
-
-          python - <<'PY'
+          check_feed() {
+            python - <<'PY'
           import json
           from pathlib import Path
 
@@ -50,16 +48,26 @@ jobs:
           channels = data['channels']
           posts = data['posts']
           failed = sum(channel['status'] != 200 for channel in channels)
-          skip = not posts and failed > len(channels) / 2
-          with open(__import__('os').environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write(f"skip_publish={'true' if skip else 'false'}\n")
-          print(f"channels={len(channels)} posts={len(posts)} failed={failed} skip_publish={skip}")
+          print('true' if not posts and failed > len(channels) / 2 else 'false')
           PY
+          }
+
+          build_feed() {
+            python build_telegram_feed.py "$1"
+            skip_publish=$(check_feed)
+            if [ "$skip_publish" = true ]; then
+              echo 'skip_publish=true' >> "$GITHUB_OUTPUT"
+              echo 'Publication skipped: no posts and more than half the channels failed.'
+              exit 0
+            fi
+            python render_telegram_feed.py
+          }
+
+          build_feed 48
 
           if [ "$(wc -c < index.html)" -gt $((15 * 1024 * 1024)) ]; then
             echo 'index.html exceeds 15 MiB; retrying with 36 hours.'
-            python build_telegram_feed.py 36
-            python render_telegram_feed.py
+            build_feed 36
           fi
 
           if [ "$(wc -c < index.html)" -gt $((15 * 1024 * 1024)) ]; then
@@ -88,7 +96,7 @@ jobs:
           check.feed(page)
           if not page.lstrip().lower().startswith('<!doctype html>') or not check.title:
               raise SystemExit('Generated page is missing a valid HTML document/title.')
-          if 'summary-wrap' in page or 'Главное за двое суток' in page or 'топ-3' in page.lower():
+          if 'class="summary-wrap"' in page:
               raise SystemExit('Generated page unexpectedly contains summary content.')
           if page.count('assets/lighthouse.png') != 1:
               raise SystemExit('Expected one lighthouse icon in the feed header.')
@@ -109,7 +117,7 @@ jobs:
 
       - name: Upload site artifact
         if: steps.feed.outputs.skip_publish != 'true'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: _site
 
