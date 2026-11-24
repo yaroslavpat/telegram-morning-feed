@@ -1,0 +1,122 @@
+name: Build and publish Telegram feed
+
+on:
+  schedule:
+    # 10:00 Europe/Samara (UTC+4 year-round).
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      skip_publish: ${{ steps.feed.outputs.skip_publish }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Build and render feed
+        id: feed
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          printf '[]\n' > work/telegram_summary.json
+          python build_telegram_feed.py 48
+          python render_telegram_feed.py
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path('work/telegram_posts.json').read_text(encoding='utf-8'))
+          channels = data['channels']
+          posts = data['posts']
+          failed = sum(channel['status'] != 200 for channel in channels)
+          skip = not posts and failed > len(channels) / 2
+          with open(__import__('os').environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f"skip_publish={'true' if skip else 'false'}\n")
+          print(f"channels={len(channels)} posts={len(posts)} failed={failed} skip_publish={skip}")
+          PY
+
+          if [ "$(wc -c < index.html)" -gt $((15 * 1024 * 1024)) ]; then
+            echo 'index.html exceeds 15 MiB; retrying with 36 hours.'
+            python build_telegram_feed.py 36
+            python render_telegram_feed.py
+          fi
+
+          if [ "$(wc -c < index.html)" -gt $((15 * 1024 * 1024)) ]; then
+            echo 'index.html still exceeds 15 MiB after the 36-hour retry.' >&2
+            exit 1
+          fi
+
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          class PageCheck(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.title = False
+                  self.posts = 0
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  if tag == 'title':
+                      self.title = True
+                  if tag == 'article' and 'post' in attrs.get('class', '').split():
+                      self.posts += 1
+
+          page = Path('index.html').read_text(encoding='utf-8')
+          check = PageCheck()
+          check.feed(page)
+          if not page.lstrip().lower().startswith('<!doctype html>') or not check.title:
+              raise SystemExit('Generated page is missing a valid HTML document/title.')
+          if '<section class="summary-wrap">' in page:
+              raise SystemExit('Generated page unexpectedly contains the summary section.')
+          if not Path('work/telegram_summary.json').exists():
+              raise SystemExit('Expected empty summary input is missing.')
+          print(f'Validated index.html ({len(page.encode("utf-8"))} bytes, {check.posts} posts).')
+          PY
+
+          mkdir -p _site
+          cp index.html .nojekyll _site/
+
+      - name: Configure GitHub Pages
+        if: steps.feed.outputs.skip_publish != 'true'
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        if: steps.feed.outputs.skip_publish != 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.skip_publish != 'true'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy site
+        id: deployment
+        uses: actions/deploy-pages@v4

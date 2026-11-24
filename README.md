@@ -11,12 +11,14 @@ python3 -m pip install -r requirements.txt
 python3 build_telegram_feed.py 48
 ```
 
-Затем на основе `work/telegram_posts.json` подготовь до трёх свежих саммари и сохрани их в `work/telegram_summary.json` как JSON-массив объектов с полями `title`, `body`, `url`, `channel`. После этого собери страницу:
+Саммари не используются. Создай пустой файл `work/telegram_summary.json` и собери страницу:
 
 ```sh
+mkdir -p work
+printf '[]\n' > work/telegram_summary.json
 python3 render_telegram_feed.py
 ```
 
-Результат — `index.html`. После отправки изменений в публикуемую ветку GitHub Pages обновит страницу.
+Результат — `index.html`. GitHub Actions также собирает и публикует ленту ежедневно в 10:00 по Самаре; компьютер для этого не нужен. Публикация проходит через настроенный GitHub Pages workflow.
 
 Сборщик сохраняет встроенные ссылки и форматирование текста Telegram, удаляет пробелы перед знаками препинания и загружает аватарки и медиа. Страница отображает время Самары, имеет переключатель фильтра «Нож» и «Пчела» и бесшовно раскрывает длинные посты.
