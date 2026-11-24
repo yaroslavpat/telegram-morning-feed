@@ -90,12 +90,12 @@ jobs:
               raise SystemExit('Generated page is missing a valid HTML document/title.')
           if 'summary-wrap' in page or 'Главное за двое суток' in page or 'топ-3' in page.lower():
               raise SystemExit('Generated page unexpectedly contains summary content.')
-          if 'assets/lighthouse.png' not in page:
-              raise SystemExit('Generated page is missing the lighthouse icon.')
+          if page.count('assets/lighthouse.png') != 1:
+              raise SystemExit('Expected one lighthouse icon in the feed header.')
           if not Path('assets/lighthouse.png').is_file():
               raise SystemExit('The local lighthouse icon asset is missing.')
-          if 'aria-pressed="true"' not in page:
-              raise SystemExit('Channel filters are not hidden by default.')
+          if 'role="switch" aria-checked="true"' not in page or page.count('role="switch"') != 1:
+              raise SystemExit('Expected one default-on channel filter switch.')
           print(f'Validated index.html ({len(page.encode("utf-8"))} bytes, {check.posts} posts).')
           PY
 
